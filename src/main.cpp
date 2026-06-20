@@ -13,13 +13,14 @@ static const int kAdcPins[kNumCh] = {5, 6, 7, 10, 1, 2, 8, 9};
 // and fired alternately (A then B). Benefits: only 4 LEDs (~12mA) lit at once,
 // and physically-adjacent LEDs are never on together -> less optical crosstalk.
 // Direct drive: GPIO -[75ohm]- LED(+) , LED(-) -> GND. Active HIGH. ~3mA/LED, no MOSFET.
-//   kLedPinA (M5-Bus pin15 = G18) -> LEDs of CH1,3,5,7  (even index)
-//   kLedPinB (M5-Bus pin16 = G17) -> LEDs of CH2,4,6,8  (odd index)
+// ACTUAL wiring is paired (AABB), deduced from which channels responded:
+//   kLedPinA (M5-Bus pin15 = G18) -> LEDs of index 0,1,4,5  (G5,G6,G1,G2)
+//   kLedPinB (M5-Bus pin16 = G17) -> LEDs of index 2,3,6,7  (G7,G10,G8,G9)
 static const int kLedPinA = 18;
 static const int kLedPinB = 17;
 static const bool kLedActiveHigh = true;
-// channel i -> which LED pin: even index = A, odd index = B
-inline int ledPinForCh(int i) { return (i & 1) ? kLedPinB : kLedPinA; }
+// channel i -> LED group: pairs AABB -> 0 = A, 1 = B
+inline int ledGroupForCh(int i) { return (i >> 1) & 1; }
 static const int kSettleUs = 3000;  // wait after toggling LED (RC of 47k * Cnode)
 static const int kAvg = 4;          // samples averaged per reading
 
@@ -81,16 +82,22 @@ void loop() {
   int ambient[kNumCh];
   int lit[kNumCh];
 
-  // 1) all LEDs off -> ambient
+  // 1) all LEDs off -> ambient (all channels)
   ledAllOff();
   delayMicroseconds(kSettleUs);
   for (int i = 0; i < kNumCh; ++i) ambient[i] = readMv(kAdcPins[i]);
 
-  // 2) all LEDs on (simultaneous) -> lit
-  ledAll(true);
+  // 2) group A on -> read group-A channels (index 0,1,4,5)
+  ledWrite(kLedPinA, true);
   delayMicroseconds(kSettleUs);
-  for (int i = 0; i < kNumCh; ++i) lit[i] = readMv(kAdcPins[i]);
-  ledAllOff();
+  for (int i = 0; i < kNumCh; ++i) if (ledGroupForCh(i) == 0) lit[i] = readMv(kAdcPins[i]);
+  ledWrite(kLedPinA, false);
+
+  // 3) group B on -> read group-B channels (index 2,3,6,7)
+  ledWrite(kLedPinB, true);
+  delayMicroseconds(kSettleUs);
+  for (int i = 0; i < kNumCh; ++i) if (ledGroupForCh(i) == 1) lit[i] = readMv(kAdcPins[i]);
+  ledWrite(kLedPinB, false);
 
   const int slotW = g_w / kNumCh;
   const int barW = slotW - 6;
